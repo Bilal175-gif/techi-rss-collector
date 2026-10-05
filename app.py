@@ -2,13 +2,11 @@
 
 A Streamlit app: paste RSS/Atom feed URLs (tech-news defaults included),
 fetch + parse them with feedparser, and browse the latest headlines in a
-clean table with source, published time and link. Includes a keyword
-filter and a refresh button.
+clean table with source, published time and link. Includes a keyword filter.
 """
 
 from __future__ import annotations
 
-import os
 import time
 import urllib.request
 from datetime import datetime, timezone
@@ -27,7 +25,7 @@ https://www.wired.com/feed/rss
 https://hnrss.org/frontpage
 https://www.technologyreview.com/feed/"""
 
-FETCH_TIMEOUT = int(os.getenv("FETCH_TIMEOUT_SECONDS", "15"))  # seconds per feed
+FETCH_TIMEOUT = 15  # seconds per feed
 
 
 def parse_feed_urls(text: str) -> list[str]:
@@ -112,3 +110,79 @@ def filter_by_keyword(items: list[dict], keyword: str) -> list[dict]:
     if not kw:
         return items
     return [i for i in items if kw in i["title"].lower()]
+
+
+# ---------------------------------------------------------------------------
+# Streamlit UI
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    st.set_page_config(page_title="TECHi RSS Headline Collector",
+                       page_icon="📰", layout="wide")
+    st.title("📰 TECHi: RSS Headline Collector")
+    st.caption(
+        "Paste RSS/Atom feed URLs, fetch the latest tech headlines, "
+        "filter by keyword."
+    )
+
+    with st.sidebar:
+        st.header("Feeds")
+        feeds_text = st.text_area(
+            "RSS feed URLs (one per line)",
+            value=DEFAULT_FEEDS,
+            height=180,
+        )
+        max_items = st.slider("Max headlines per feed", 5, 50, 15)
+        keyword = st.text_input("Keyword filter (optional)",
+                                placeholder="e.g. AI, Apple, startup")
+        fetch = st.button("⬇️ Fetch", type="primary", use_container_width=True)
+
+    if fetch or "headlines" not in st.session_state:
+        urls = parse_feed_urls(feeds_text)
+        if not urls:
+            st.error("Please enter at least one feed URL.")
+            return
+        with st.spinner(f"Fetching {len(urls)} feeds…"):
+            items, status = collect_headlines(urls, max_items)
+        st.session_state["headlines"] = items
+        st.session_state["feed_status"] = status
+
+    items: list[dict] = st.session_state.get("headlines", [])
+    status: list[str] = st.session_state.get("feed_status", [])
+
+    with st.expander("Feed status", expanded=False):
+        for line in status:
+            st.write(line)
+
+    items = filter_by_keyword(items, keyword)
+    st.subheader(f"📋 {len(items)} headlines")
+
+    if not items:
+        st.info("No headlines found. Try different feeds or clear the filter.")
+        return
+
+    table = [
+        {
+            "Published": (
+                i["published"].astimezone().strftime("%Y-%m-%d %H:%M")
+                if i["published"] else "—"
+            ),
+            "Source": i["source"],
+            "Headline": i["title"],
+            "Link": i["link"],
+        }
+        for i in items
+    ]
+    st.dataframe(
+        table,
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "Link": st.column_config.LinkColumn("Link", display_text="Open ↗"),
+            "Headline": st.column_config.TextColumn("Headline", width="large"),
+        },
+    )
+
+
+if __name__ == "__main__":
+    main()
