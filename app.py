@@ -2,11 +2,13 @@
 
 A Streamlit app: paste RSS/Atom feed URLs (tech-news defaults included),
 fetch + parse them with feedparser, and browse the latest headlines in a
-clean table with source, published time and link. Includes a keyword filter.
+clean table with source, published time and link. Includes a keyword
+filter and a refresh button.
 """
 
 from __future__ import annotations
 
+import os
 import time
 import urllib.request
 from datetime import datetime, timezone
@@ -25,7 +27,7 @@ https://www.wired.com/feed/rss
 https://hnrss.org/frontpage
 https://www.technologyreview.com/feed/"""
 
-FETCH_TIMEOUT = 15  # seconds per feed
+FETCH_TIMEOUT = int(os.getenv("FETCH_TIMEOUT_SECONDS", "15"))  # seconds per feed
 
 
 def parse_feed_urls(text: str) -> list[str]:
@@ -135,9 +137,17 @@ def main() -> None:
         max_items = st.slider("Max headlines per feed", 5, 50, 15)
         keyword = st.text_input("Keyword filter (optional)",
                                 placeholder="e.g. AI, Apple, startup")
-        fetch = st.button("⬇️ Fetch", type="primary", use_container_width=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            fetch = st.button("⬇️ Fetch", type="primary",
+                              use_container_width=True)
+        with col2:
+            refresh = st.button("🔄 Refresh", use_container_width=True)
 
-    if fetch or "headlines" not in st.session_state:
+    if refresh:
+        st.cache_data.clear()
+
+    if fetch or refresh or "headlines" not in st.session_state:
         urls = parse_feed_urls(feeds_text)
         if not urls:
             st.error("Please enter at least one feed URL.")
@@ -146,13 +156,20 @@ def main() -> None:
             items, status = collect_headlines(urls, max_items)
         st.session_state["headlines"] = items
         st.session_state["feed_status"] = status
+        st.session_state["fetched_at"] = datetime.now(timezone.utc)
 
     items: list[dict] = st.session_state.get("headlines", [])
     status: list[str] = st.session_state.get("feed_status", [])
+    fetched_at = st.session_state.get("fetched_at")
 
     with st.expander("Feed status", expanded=False):
         for line in status:
             st.write(line)
+        if fetched_at:
+            st.caption(
+                "Last fetched: "
+                + fetched_at.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+            )
 
     items = filter_by_keyword(items, keyword)
     st.subheader(f"📋 {len(items)} headlines")
